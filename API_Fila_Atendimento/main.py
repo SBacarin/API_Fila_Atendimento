@@ -1,18 +1,16 @@
-## Passo 1: importando a classe FastAPI e suas funcionalidades
-from fastapi import FastAPI, status
+## Passo 1: importando a classe FastAPI, para mensagens de erro  e suas funcionalidades
+from fastapi import FastAPI, HTTPException, status
 ##importando o pydantic dá propria biblioteca do python, é uma dependencia da FastAPI
 from pydantic import BaseModel
 ## permite criação da variável com o preenchimento somente de N ou P , ou seja atendimento Normal ou Prioritário
 from typing import Literal
-## para mensagens de erro
-from fastapi import HTTPException
 ## importando servidor web
 import uvicorn
 
 ## Passo 2: criando para a variável "MyAPP" como uma instância da classe FastAPI
 MyApp = FastAPI()
 
-## criando uma estrutura para receber as vendas, semelhante a uma tabela 
+## criando uma estrutura para receber a fila, semelhante a uma tabela 
 class Fila(BaseModel):
     id: int     
     nome: str
@@ -20,7 +18,7 @@ class Fila(BaseModel):
     Atendido: bool = False
     Tp_Atendimento: Literal ['N', 'P']
 
-## criando banco de dados das fila em memória
+## criando banco de dados da fila em memória
 db_FilaClientes = [
     Fila(id=1, nome="Breno", Dt_Entrada='26/10/2024', Atendido=False, Tp_Atendimento='N'),
     Fila(id=2, nome="Larissa", Dt_Entrada='26/10/2024', Atendido=False, Tp_Atendimento='N'),
@@ -84,16 +82,34 @@ async def adiciona_cliente(novo_cliente: Fila):
     # confirmando tamanho do nome e gerando mensagem de erro caso for maior
     if len(novo_cliente.nome) > 20:
         raise HTTPException(status_code=400, detail="Nome deve ter no máximo 20 caracteres.")
-    
-    # Gerar automaticamente o próximo ID e inserindo novo cliente no BD Fila em memória
-    novo_id = max([cliente.id for cliente in db_FilaClientes], default=0) + 1
-    novo_cliente.id = novo_id
-    db_FilaClientes.append(novo_cliente)
 
-    return {"mensagem": "Cliente adicionado com sucesso!", "Posição": novo_id}
+     # Gerar ID para o novo cliente
+    novo_cliente.id = len(db_FilaClientes) + 1
+
+    if novo_cliente.Tp_Atendimento == 'P':
+        # Encontrar a posição do último cliente prioritário
+        pos_ultimo_prioritario = -1
+        for idx, cliente in enumerate(db_FilaClientes):
+            if cliente.Tp_Atendimento == 'P':
+                pos_ultimo_prioritario = idx
+
+        # Inserir o cliente após o último prioritário ou no início se não houver prioritários
+        if pos_ultimo_prioritario != -1:
+            db_FilaClientes.insert(pos_ultimo_prioritario + 1, novo_cliente)
+        else:
+            db_FilaClientes.insert(0, novo_cliente)
+    else:
+        # Inserir no final da fila para atendimento normal
+        db_FilaClientes.append(novo_cliente)
+
+    # Ajustar as posições na fila (IDs) após a inserção
+    for idx, cliente in enumerate(db_FilaClientes, start=1):
+        cliente.id = idx
+
+    return {"mensagem": f"Cliente '{novo_cliente.nome}' adicionado com sucesso!", "id": novo_cliente.id}
 
 
-### 4.PUT /fila
+### 4.PUT /fila  == ATENDIMENTO 
 ## a.Será atualizada a posição de cada pessoa que está na fila (-1);
 ## b.Caso o cliente esteja na posição 1 ele será atualizado para a posição 0 e o campo atendido será setado para TRUE.
 @MyApp.put("/fila/", status_code=status.HTTP_200_OK)
